@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using System.IO;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 
 #pragma warning disable IDE1006
@@ -66,34 +67,26 @@ namespace pWhois
                     textIP.Text = "ERROR";
                 }
             }
-            // проверяем конечный полученный адрес IP
+            // проверяем конечный полученный адрес IP. Если он неверный - выходим.
             if (!CheckIPSyntax(ipAddr))
             {
                 BtnMap.Enabled = false;
                 return;
             }
-            label2.Text = "";
-            // загружаем инфо
+            
+            // загружаем информацию по адресу IP
             this.Cursor = Cursors.WaitCursor;
-            // сначала получаем объект info из файла (кэш). Если неуспешно - то из URL
+            // сначала получаем info из файла (кэш). Если успешно, то выводим инфо и выходим. 
             ipinfo = GetInfoFromFile(ipAddr);
-            if (ipinfo == null)
-            {
-                ipinfo = GetInfoFromURL(ipAddr);
-                testResult.BackColor = Color.White;
-                testResult.ForeColor = Color.Blue;
-            }
-            else
+            if(ipinfo!=null)
             {
                 testResult.BackColor = Color.Gainsboro;
                 testResult.ForeColor = Color.Black;
+                ShowResult();
+                return;
             }
-            testResult.Visible = true;
-            if (ipinfo != null)
-            {
-                this.testResult.Text = ipinfo.ToString();
-                this.BtnMap.Enabled = true;
-            }
+            // Если в кеше инфы нет, то получаем по URL. ShowInfo() вызывается из GetInfoFromURL()
+            GetInfoFromURL(ipAddr);
             this.Cursor = Cursors.Default;
         }
 
@@ -139,18 +132,35 @@ namespace pWhois
             return null;
         }
 
-        private IPInfo.IPInfo GetInfoFromURL(string ipAddr)
+        private async void GetInfoFromURL(string ipAddr, int timeout=10000)
         {
-            IPInfo.IPInfo info = null;
+            ipinfo = null;
+            bool cancelled = false;
+            string jsonStr = null;
             using (WebClient wc = new WebClient())
             {
+                wc.DownloadStringCompleted += (s, e) =>
+                {
+                    if (e.Error != null || e.Cancelled)
+                    {
+                        cancelled = true;
+                        textIP.Text = "ERROR";
+                    }
+                    else
+                    {
+                        jsonStr = e.Result;
+                        ipinfo = JsonSerializer.Deserialize<IPInfo.IPInfo>(jsonStr);
+                        SaveInfoToFile(ipinfo);
+                        ShowResult();
+                    }
+                };
                 Uri uri = new Uri($"http://free.ipwhois.io/json/{ipAddr}");
-
-                string jsonStr = wc.DownloadString($"http://free.ipwhois.io/json/{ipAddr}");
-                info = JsonSerializer.Deserialize<IPInfo.IPInfo>(jsonStr);
-                SaveInfoToFile(info);
+                wc.DownloadStringAsync(uri);
+                // ожидаем ответа
+                var currentTime = DateTime.Now;
+                while (jsonStr == null && !cancelled && DateTime.Now.Subtract(currentTime).TotalMilliseconds < timeout)
+                    await Task.Delay(100);
             }
-            return info;
         }
 
         private void SaveInfoToFile(IPInfo.IPInfo info = null)
@@ -201,7 +211,16 @@ namespace pWhois
 
         private void ShowResult()
         {
-
+            if (ipinfo != null)
+            {
+                label2.Text = "";
+                testResult.Text = ipinfo.ToString();
+            } else
+            {
+                label2.Text = "Ошибка";
+                testResult.Text = "";
+            }
+            this.Cursor = Cursors.Default;
         }
     }
 }
