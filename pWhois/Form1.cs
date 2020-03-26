@@ -49,15 +49,16 @@ namespace pWhois
         private void BtnShow_Click(object sender, EventArgs e)
         {
             string ipAddr = textIP.Text.Trim();
-            // Если это не адрес IP, то это деменное имя; разрешаем его в IP
+            // Если это не адрес IP, то это доменное имя; разрешаем его в IP
             if (!CheckIPSyntax(ipAddr))
             {
+                label2.Text = "Разрешение имени...";
                 try
                 {
                     // GetHostEntry() выдает ошибку, если указан не домен, а адрес IP. Плюс тормозит. Так что Resolve() лучше.
                     CheckHostSyntax(ref ipAddr);
 #pragma warning disable CS0618 // Тип или член устарел
-                    // ниже надо сделать асинхронно
+                    // ниже надо бы сделать асинхронно...
                     textIP.Text = ipAddr = Dns.Resolve(ipAddr).AddressList[0].ToString();
 #pragma warning restore CS0618 // Тип или член устарел
                 }
@@ -67,6 +68,7 @@ namespace pWhois
                     textIP.Text = "ERROR";
                 }
             }
+            label2.Text = "";
             // проверяем конечный полученный адрес IP. Если он неверный - выходим.
             if (!CheckIPSyntax(ipAddr))
             {
@@ -77,12 +79,12 @@ namespace pWhois
             // загружаем информацию по адресу IP
             this.Cursor = Cursors.WaitCursor;
             // сначала получаем info из файла (кэш). Если успешно, то выводим инфо и выходим. 
-            ipinfo = GetInfoFromFile(ipAddr);
+            GetInfoFromFile(textIP.Text);
             if(ipinfo!=null)
             {
                 testResult.BackColor = Color.Gainsboro;
                 testResult.ForeColor = Color.Black;
-                ShowResult();
+                ShowResult(ipAddr);
                 return;
             }
             // Если в кеше инфы нет, то получаем по URL. ShowInfo() вызывается из GetInfoFromURL()
@@ -119,17 +121,17 @@ namespace pWhois
             }
         }
 
-        private IPInfo.IPInfo GetInfoFromFile(string ipAddr)
+        private void GetInfoFromFile(string ipAddr)
         {
+            ipinfo = null;
             foreach (IPInfo.IPInfo i in infoList)
             {
                 if (i.ip == ipAddr)
                 {
                     i.success = true;
-                    return i;
+                    ipinfo = i;
                 }
             }
-            return null;
         }
 
         private async void GetInfoFromURL(string ipAddr, int timeout=10000)
@@ -144,6 +146,8 @@ namespace pWhois
                     if (e.Error != null || e.Cancelled)
                     {
                         cancelled = true;
+                        jsonStr = null;
+                        ipinfo = null;
                         textIP.Text = "ERROR";
                     }
                     else
@@ -151,11 +155,11 @@ namespace pWhois
                         jsonStr = e.Result;
                         ipinfo = JsonSerializer.Deserialize<IPInfo.IPInfo>(jsonStr);
                         SaveInfoToFile(ipinfo);
-                        ShowResult();
                     }
+                    ShowResult(ipAddr);
                 };
                 Uri uri = new Uri($"http://free.ipwhois.io/json/{ipAddr}");
-                wc.DownloadStringAsync(uri);
+                wc.DownloadStringAsync(uri); //
                 // ожидаем ответа
                 var currentTime = DateTime.Now;
                 while (jsonStr == null && !cancelled && DateTime.Now.Subtract(currentTime).TotalMilliseconds < timeout)
@@ -209,12 +213,15 @@ namespace pWhois
             }
         }
 
-        private void ShowResult()
+        private void ShowResult(string hostname=null)
         {
+            if (hostname != null)
+                testResult.Text = "Имя: " + hostname + Environment.NewLine;
+            else testResult.Text = "";
             if (ipinfo != null)
             {
                 label2.Text = "";
-                testResult.Text = ipinfo.ToString();
+                testResult.Text += ipinfo.ToString();
             } else
             {
                 label2.Text = "Ошибка";
